@@ -1,8 +1,9 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { DataPoint2D, PointerToolMode } from '../datasets/tabular2d';
 import { AlgorithmPlugin, VisualArtifact, TaskType } from '../types/algorithm';
 import { ThemeMode } from '../types/theme';
 import { DirtyManager } from './dirty-manager';
+import { observeElementSize, syncCanvasBufferSize } from './canvasUtils';
 import { CLUSTER_PALETTE } from '../algorithms/stage03/clusteringUtils';
 import { populateHeatmapImageData } from './color-maps';
 
@@ -57,7 +58,15 @@ export const Stage03Canvas: React.FC<Stage03CanvasProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const insetCanvasRef = useRef<HTMLCanvasElement>(null);
-  const offscreenCanvasRef = useRef<HTMLCanvasElement>(document.createElement('canvas'));
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const getOffscreenCanvas = () => {
+    if (!offscreenCanvasRef.current) {
+      offscreenCanvasRef.current = document.createElement('canvas');
+    }
+    return offscreenCanvasRef.current;
+  };
+  const mainSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  const insetSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
   const cachedImageDataRef = useRef<ImageData | null>(null);
 
   const [discretize, setDiscretize] = useState<boolean>(false);
@@ -118,48 +127,30 @@ export const Stage03Canvas: React.FC<Stage03CanvasProps> = ({
   const toCoordX = (px: number, w: number) => VIEWPORT.minX + (px / w) * (VIEWPORT.maxX - VIEWPORT.minX);
   const toCoordY = (py: number, h: number) => VIEWPORT.maxY - (py / h) * (VIEWPORT.maxY - VIEWPORT.minY);
 
-  // Resize handling
-  const resizeCanvases = useCallback(() => {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    if (mainCanvasRef.current) {
-      const c = mainCanvasRef.current;
-      const rect = c.getBoundingClientRect();
-      const targetW = Math.max(1, Math.floor(rect.width * dpr));
-      const targetH = Math.max(1, Math.floor(rect.height * dpr));
-      if (c.width !== targetW || c.height !== targetH) {
-        c.width = targetW;
-        c.height = targetH;
-      }
-    }
-
-    if (insetCanvasRef.current) {
-      const ic = insetCanvasRef.current;
-      const rect = ic.getBoundingClientRect();
-      const targetW = Math.max(1, Math.floor(rect.width * dpr));
-      const targetH = Math.max(1, Math.floor(rect.height * dpr));
-      if (ic.width !== targetW || ic.height !== targetH) {
-        ic.width = targetW;
-        ic.height = targetH;
-      }
-    }
-
-    dirtyManager.markDirty();
-    setRenderTick((t) => t + 1);
-  }, [dirtyManager]);
-
+  // Resize handling via ResizeObserver contentRect (zero forced reflow)
   useEffect(() => {
-    resizeCanvases();
-    const ro = new ResizeObserver(() => resizeCanvases());
-    if (containerRef.current) ro.observe(containerRef.current);
-    if (mainCanvasRef.current) ro.observe(mainCanvasRef.current);
-    if (insetCanvasRef.current) ro.observe(insetCanvasRef.current);
-    return () => ro.disconnect();
-  }, [resizeCanvases, showInset]);
+    const cleanups = [
+      observeElementSize(mainCanvasRef.current, ({ width, height }) => {
+        mainSizeRef.current = { width, height };
+        const c = mainCanvasRef.current;
+        if (c) syncCanvasBufferSize(c, width, height, 2);
+        dirtyManager.markDirty();
+        setRenderTick((t) => t + 1);
+      }),
+      observeElementSize(insetCanvasRef.current, ({ width, height }) => {
+        insetSizeRef.current = { width, height };
+        const ic = insetCanvasRef.current;
+        if (ic) syncCanvasBufferSize(ic, width, height, 2);
+        dirtyManager.markDirty();
+        setRenderTick((t) => t + 1);
+      }),
+    ];
+    return () => cleanups.forEach((fn) => fn());
+  }, [dirtyManager, showInset]);
 
   // Update offscreen heatmap buffer
   useEffect(() => {
-    const offCanvas = offscreenCanvasRef.current;
+    const offCanvas = getOffscreenCanvas();
     if (!gridValues || gridValues.length === 0) {
       if (offCanvas.width > 0 && offCanvas.height > 0) {
         const offCtx = offCanvas.getContext('2d');
@@ -199,29 +190,22 @@ export const Stage03Canvas: React.FC<Stage03CanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const rect = canvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
+    const w = mainSizeRef.current.width;
+    const h = mainSizeRef.current.height;
     if (w <= 0 || h <= 0) return;
-    const targetW = Math.floor(w * dpr);
-    const targetH = Math.floor(h * dpr);
-    if (canvas.width !== targetW || canvas.height !== targetH) {
-      canvas.width = targetW;
-      canvas.height = targetH;
-    }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    syncCanvasBufferSize(canvas, w, h, 2);
 
     // Background
     ctx.fillStyle = isCarbon ? '#131312' : '#FAF9F5';
     ctx.fillRect(0, 0, w, h);
 
     // Draw Density / Soft Voronoi Heatmap Buffer
-    if (gridValues && gridValues.length > 0 && offscreenCanvasRef.current.width > 0) {
+    const offCanvas = offscreenCanvasRef.current;
+    if (gridValues && gridValues.length > 0 && offCanvas && offCanvas.width > 0) {
       ctx.save();
       ctx.imageSmoothingEnabled = !discretize;
       ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(offscreenCanvasRef.current, 0, 0, w, h);
+      ctx.drawImage(offCanvas, 0, 0, w, h);
       ctx.restore();
     }
 
@@ -634,18 +618,10 @@ export const Stage03Canvas: React.FC<Stage03CanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const rect = canvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
+    const w = insetSizeRef.current.width;
+    const h = insetSizeRef.current.height;
     if (w <= 0 || h <= 0) return;
-    const targetW = Math.floor(w * dpr);
-    const targetH = Math.floor(h * dpr);
-    if (canvas.width !== targetW || canvas.height !== targetH) {
-      canvas.width = targetW;
-      canvas.height = targetH;
-    }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    syncCanvasBufferSize(canvas, w, h, 2);
 
     ctx.fillStyle = isCarbon ? '#0F0F0E' : '#F5F4EE';
     ctx.fillRect(0, 0, w, h);

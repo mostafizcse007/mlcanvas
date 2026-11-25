@@ -1,12 +1,40 @@
-import { defineConfig } from 'vite';
+import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+
+/**
+ * Inlines the entry CSS bundle into dist/index.html during production builds
+ * to eliminate render-blocking stylesheet round-trips while keeping KaTeX CSS lazy.
+ */
+function inlineEntryCssPlugin(): Plugin {
+  return {
+    name: 'inline-entry-css',
+    apply: 'build',
+    enforce: 'post',
+    transformIndexHtml(html, ctx) {
+      if (!ctx.bundle) return html;
+      return html.replace(
+        /<link\s+rel="stylesheet"[^>]*href="([^"]*\/assets\/index-[^"]+\.css)"[^>]*>/g,
+        (fullTag, href) => {
+          const assetFileName = href.replace(/^\//, '');
+          const chunk = ctx.bundle?.[assetFileName];
+          if (chunk && chunk.type === 'asset' && typeof chunk.source === 'string') {
+            delete ctx.bundle[assetFileName];
+            return `<style>${chunk.source}</style>`;
+          }
+          return fullTag;
+        }
+      );
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    inlineEntryCssPlugin(),
   ],
   worker: {
     format: 'es',
@@ -16,7 +44,7 @@ export default defineConfig({
     cssCodeSplit: true,
     chunkSizeWarningLimit: 600,
     modulePreload: {
-      resolveDependencies(filename, deps) {
+      resolveDependencies(_filename, deps) {
         // Prevent preloading heavy non-initial stages on initial page entry
         return deps.filter(
           (dep) =>
@@ -48,9 +76,6 @@ export default defineConfig({
           }
           if (id.includes('node_modules/lucide-react/')) {
             return 'vendor-icons';
-          }
-          if (id.includes('src/algorithms/stage01') || id.includes('src\\algorithms\\stage01')) {
-            return 'stage01-solvers';
           }
           if (id.includes('src/algorithms/stage02') || id.includes('src\\algorithms\\stage02')) {
             return 'stage02-solvers';

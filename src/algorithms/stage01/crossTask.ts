@@ -39,3 +39,16 @@ export function isMultiClassClassificationDataset(dataset: DatasetContainer): bo
       dataset.test?.some((p) => p.y === 2)
   );
 }
+
+export const LOGREG_MIN_THRESHOLD = 0.01;
+export const LOGREG_MAX_THRESHOLD = 0.99;
+
+/**
+ * Clamps the Logistic Regression probability cutoff τ to [0.01, 0.99]
+ * so logit ln(τ / (1 - τ)) remains finite and never produces ±Infinity or NaN.
+ */
+export function clampThreshold(raw: unknown): number {
+  const val = Number(raw);
+  if (!Number.isFinite(val)) return 0.5;
+  return Math.min(LOGREG_MAX_THRESHOLD, Math.max(LOGREG_MIN_THRESHOLD, val));
+}

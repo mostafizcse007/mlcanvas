@@ -3,6 +3,11 @@ import { DataPoint2D, PointerToolMode } from '../datasets/tabular2d';
 import { AlgorithmPlugin, VisualArtifact, TaskType } from '../types/algorithm';
 import { ThemeMode } from '../types/theme';
 import { DirtyManager } from './dirty-manager';
+import {
+  observeElementSize,
+  subscribeDirtyRender,
+  syncCanvasBufferSize,
+} from './canvasUtils';
 import { populateHeatmapImageData } from './color-maps';
 import { Plus, Minus, Zap, Compass, Move } from 'lucide-react';
 import { BASIS_FEATURES, BasisFeature } from '../algorithms/stage04/neuralUtils';
@@ -62,7 +67,15 @@ export const Stage04Canvas: React.FC<Stage04CanvasProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const insetCanvasRef = useRef<HTMLCanvasElement>(null);
-  const offscreenCanvasRef = useRef<HTMLCanvasElement>(document.createElement('canvas'));
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const getOffscreenCanvas = () => {
+    if (!offscreenCanvasRef.current) {
+      offscreenCanvasRef.current = document.createElement('canvas');
+    }
+    return offscreenCanvasRef.current;
+  };
+  const mainSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  const insetSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
   const cachedImageDataRef = useRef<ImageData | null>(null);
 
   // Missing options from TF Playground
@@ -208,55 +221,28 @@ export const Stage04Canvas: React.FC<Stage04CanvasProps> = ({
     [latentViewport]
   );
 
-  // Resize Handling
-  const resizeCanvases = useCallback(() => {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    if (mainCanvasRef.current) {
-      const c = mainCanvasRef.current;
-      const rect = c.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        const targetW = Math.floor(rect.width * dpr);
-        const targetH = Math.floor(rect.height * dpr);
-        if (c.width !== targetW || c.height !== targetH) {
-          c.width = targetW;
-          c.height = targetH;
-          const ctx = c.getContext('2d');
-          if (ctx) ctx.scale(dpr, dpr);
-        }
-      }
-    }
-
-    if (insetCanvasRef.current) {
-      const c = insetCanvasRef.current;
-      const rect = c.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        const targetW = Math.floor(rect.width * dpr);
-        const targetH = Math.floor(rect.height * dpr);
-        if (c.width !== targetW || c.height !== targetH) {
-          c.width = targetW;
-          c.height = targetH;
-          const ctx = c.getContext('2d');
-          if (ctx) ctx.scale(dpr, dpr);
-        }
-      }
-    }
-
-    dirtyManager.markDirty();
-  }, [dirtyManager]);
-
+  // Resize Handling via ResizeObserver contentRect (zero forced reflow)
   useEffect(() => {
-    resizeCanvases();
-    const ro = new ResizeObserver(() => resizeCanvases());
-    if (containerRef.current) ro.observe(containerRef.current);
-    if (mainCanvasRef.current) ro.observe(mainCanvasRef.current);
-    if (insetCanvasRef.current) ro.observe(insetCanvasRef.current);
-    return () => ro.disconnect();
-  }, [resizeCanvases, algorithm.id, isBottleneck, isGAN, isMLP]);
+    const cleanups = [
+      observeElementSize(mainCanvasRef.current, ({ width, height }) => {
+        mainSizeRef.current = { width, height };
+        const c = mainCanvasRef.current;
+        if (c) syncCanvasBufferSize(c, width, height, 2);
+        dirtyManager.markDirty();
+      }),
+      observeElementSize(insetCanvasRef.current, ({ width, height }) => {
+        insetSizeRef.current = { width, height };
+        const c = insetCanvasRef.current;
+        if (c) syncCanvasBufferSize(c, width, height, 2);
+        dirtyManager.markDirty();
+      }),
+    ];
+    return () => cleanups.forEach((fn) => fn());
+  }, [dirtyManager, algorithm.id, isBottleneck, isGAN, isMLP]);
 
   // Update Low-Res Offscreen Canvas Heatmap
   useEffect(() => {
-    const off = offscreenCanvasRef.current;
+    const off = getOffscreenCanvas();
     if (!gridValues || gridValues.length === 0) {
       if (off.width > 0 && off.height > 0) {
         const offCtx = off.getContext('2d');
@@ -286,33 +272,15 @@ export const Stage04Canvas: React.FC<Stage04CanvasProps> = ({
     dirtyManager.markDirty();
   }, [gridValues, theme, discretize, dirtyManager]);
 
-  // Render Loop
+  // On-demand Dirty Render Loop (0% Idle CPU)
   useEffect(() => {
-    let animId: number;
-
     const render = () => {
-      if (!dirtyManager.checkAndClear()) {
-        animId = requestAnimationFrame(render);
-        return;
-      }
-
       // 1. Render Main Output Canvas
       const mainCanvas = mainCanvasRef.current;
       if (mainCanvas) {
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const rect = mainCanvas.getBoundingClientRect();
-        const targetW = Math.floor(rect.width * dpr);
-        const targetH = Math.floor(rect.height * dpr);
-        if (rect.width > 0 && rect.height > 0 && (mainCanvas.width !== targetW || mainCanvas.height !== targetH)) {
-          mainCanvas.width = targetW;
-          mainCanvas.height = targetH;
-          const ctx = mainCanvas.getContext('2d');
-          if (ctx) ctx.scale(dpr, dpr);
-        }
-
+        const w = mainSizeRef.current.width;
+        const h = mainSizeRef.current.height;
         const ctx = mainCanvas.getContext('2d');
-        const w = mainCanvas.clientWidth;
-        const h = mainCanvas.clientHeight;
 
         if (ctx && w > 0 && h > 0) {
           ctx.clearRect(0, 0, w, h);
@@ -324,7 +292,7 @@ export const Stage04Canvas: React.FC<Stage04CanvasProps> = ({
           // Heatmap from offscreen canvas (Only for classification and 2D surface regression; suppressed for 1D regression and unsupervised AE/VAE)
           const shouldDrawHeatmap = !is1DRegression && !isBottleneck;
           const off = offscreenCanvasRef.current;
-          if (shouldDrawHeatmap && off.width > 0 && off.height > 0) {
+          if (shouldDrawHeatmap && off && off.width > 0 && off.height > 0) {
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
             // Heatmap fills full canvas matching Stages 01-03
@@ -591,20 +559,9 @@ export const Stage04Canvas: React.FC<Stage04CanvasProps> = ({
       // 2. Render Inset Canvas (Mode B Latent Pad OR Mode C GAN Inset)
       const insetCanvas = insetCanvasRef.current;
       if (insetCanvas) {
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const rect = insetCanvas.getBoundingClientRect();
-        const targetW = Math.floor(rect.width * dpr);
-        const targetH = Math.floor(rect.height * dpr);
-        if (rect.width > 0 && rect.height > 0 && (insetCanvas.width !== targetW || insetCanvas.height !== targetH)) {
-          insetCanvas.width = targetW;
-          insetCanvas.height = targetH;
-          const ctx = insetCanvas.getContext('2d');
-          if (ctx) ctx.scale(dpr, dpr);
-        }
-
+        const iw = insetSizeRef.current.width;
+        const ih = insetSizeRef.current.height;
         const ctx = insetCanvas.getContext('2d');
-        const iw = insetCanvas.clientWidth;
-        const ih = insetCanvas.clientHeight;
 
         if (ctx && iw > 0 && ih > 0) {
           ctx.clearRect(0, 0, iw, ih);
@@ -767,12 +724,9 @@ export const Stage04Canvas: React.FC<Stage04CanvasProps> = ({
           }
         }
       }
-
-      animId = requestAnimationFrame(render);
     };
 
-    animId = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animId);
+    return subscribeDirtyRender(dirtyManager, render);
   }, [
     dirtyManager,
     isCarbon,

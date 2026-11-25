@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { AlgorithmPlugin, TelemetryMetrics, ExplanationPayload } from '../types/algorithm';
 import { ThemeMode } from '../types/theme';
 import { HistoryRingBuffer } from '../utils/ringBuffer';
+import { observeElementSize, syncCanvasBufferSize } from '../rendering/canvasUtils';
 import { LatexSpan } from '../utils/katex-render';
 import { Copy, Check, Clock, RotateCcw } from 'lucide-react';
 
@@ -104,6 +105,8 @@ export const TelemetrySidebar: React.FC<TelemetrySidebarProps> = ({
   isRunning = false,
 }) => {
   const lossCanvasRef = useRef<HTMLCanvasElement>(null);
+  const lossContainerRef = useRef<HTMLDivElement>(null);
+  const lossChartWidthRef = useRef<number>(280);
   const [hoverLoss, setHoverLoss] = useState<LossHoverInfo | null>(null);
   const [activeLensTab, setActiveLensTab] = useState<'intuition' | 'math' | 'code'>('intuition');
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
@@ -137,22 +140,15 @@ export const TelemetrySidebar: React.FC<TelemetrySidebarProps> = ({
   const fourthTelemetryMetric = getFourthTelemetryMetric(algorithm.id, isRegression, metrics);
 
   // 1. Render Dedicated Train vs Test Loss Sparkline
-  useEffect(() => {
+  const drawLossChart = useCallback(() => {
     const canvas = lossCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = canvas.parentElement?.clientWidth || 280;
+    const w = lossChartWidthRef.current;
     const h = 105;
-
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
-
-    ctx.scale(dpr, dpr);
+    syncCanvasBufferSize(canvas, w, h, 2);
 
     // Background & Boundary
     ctx.fillStyle = isCarbon ? '#131312' : '#FAF9F5';
@@ -413,6 +409,21 @@ export const TelemetrySidebar: React.FC<TelemetrySidebarProps> = ({
     }
   }, [historyBuffer, metrics, isCarbon, hoverLoss, scrubIndex, isRL, rlEpisodeCount]);
 
+  useEffect(() => {
+    drawLossChart();
+  }, [drawLossChart]);
+
+  // Track sparkline container width without forced synchronous reflow or extra React re-renders
+  useEffect(() => {
+    return observeElementSize(lossContainerRef.current, ({ width }) => {
+      const nextWidth = Math.round(width);
+      if (nextWidth > 0 && nextWidth !== lossChartWidthRef.current) {
+        lossChartWidthRef.current = nextWidth;
+        drawLossChart();
+      }
+    });
+  }, [drawLossChart]);
+
   // Handle Loss Canvas Mouse Move (Tooltip Inspector)
   const handleLossMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -559,6 +570,7 @@ export const TelemetrySidebar: React.FC<TelemetrySidebarProps> = ({
 
         {/* Dedicated Dual Loss Sparkline */}
         <div
+          ref={lossContainerRef}
           className="telemetry-chart-container h-[105px] mb-2 relative cursor-crosshair"
           onMouseMove={handleLossMouseMove}
           onMouseLeave={handleLossMouseLeave}
@@ -572,7 +584,7 @@ export const TelemetrySidebar: React.FC<TelemetrySidebarProps> = ({
               style={{
                 top: 8,
                 left: hoverLoss.x > 150 ? undefined : hoverLoss.x + 8,
-                right: hoverLoss.x > 150 ? (lossCanvasRef.current ? lossCanvasRef.current.clientWidth - hoverLoss.x + 8 : 12) : undefined,
+                right: hoverLoss.x > 150 ? lossChartWidthRef.current - hoverLoss.x + 8 : undefined,
               }}
             >
               <span className="font-semibold text-[var(--text-primary)]">

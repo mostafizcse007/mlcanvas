@@ -39,9 +39,9 @@
   --accent-crimson: #B91C1C;
 
   /* Font Families: Zero-latency editorial typography stack */
-  --font-serif: "Instrument Serif", "Iowan Old Style", "Apple Garamond", "Baskerville", "Times New Roman", Georgia, serif;
-  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
 
   /* Geometric constraints */
   --radius-none: 0px;

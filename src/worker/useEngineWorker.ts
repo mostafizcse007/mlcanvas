@@ -217,11 +217,6 @@ export function useEngineWorker({
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // Defer worker initialization until after the initial UI render finishes
-    const timer = setTimeout(() => {
-      getWorker();
-    }, 100);
-
     const handleVisibilityChange = () => {
       if (document.hidden) {
         if (isRunningRef.current) {
@@ -246,7 +241,6 @@ export function useEngineWorker({
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      clearTimeout(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (stepTimerRef.current !== null) {
         clearTimeout(stepTimerRef.current);

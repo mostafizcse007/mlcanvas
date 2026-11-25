@@ -34,7 +34,7 @@ export const SymbolicStrip: React.FC<SymbolicStripProps> = ({
         aria-expanded={isExpanded}
         aria-controls={contentId}
         onClick={() => setIsExpanded((prev) => !prev)}
-        className="flex items-center gap-1 px-1.5 py-0.5 border border-[var(--border-hairline)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-active)] text-[var(--text-primary)] text-[9px] uppercase tracking-wider font-medium shrink-0 cursor-pointer transition-colors"
+        className="flex items-center gap-1 px-2 py-1 min-h-[24px] border border-[var(--border-hairline)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-active)] text-[var(--text-primary)] text-[9px] uppercase tracking-wider font-medium shrink-0 cursor-pointer transition-colors"
         title={isExpanded ? 'Collapse Symbolic Strip' : 'Expand Symbolic Strip'}
       >
         {isExpanded ? (

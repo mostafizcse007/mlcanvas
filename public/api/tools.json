@@ -1,0 +1,26 @@
+{
+  "name": "ML Canvas Interactive Solver",
+  "version": "0.1.0",
+  "description": "Client-side interactive machine learning laboratory and off-thread mathematical solver workbench covering 51 algorithms across 7 stages.",
+  "protocol": "mcp-server-card",
+  "capabilities": {
+    "stages": 7,
+    "algorithms": 51,
+    "execution": "web-worker",
+    "urlStateSync": true
+  },
+  "resources": [
+    {
+      "name": "mlcanvas-workbench",
+      "uri": "/",
+      "mimeType": "text/html",
+      "description": "Interactive ML Canvas workbench supporting hash-encoded algorithm, dataset, and hyperparameter parameters."
+    },
+    {
+      "name": "llms-documentation",
+      "uri": "/llms.txt",
+      "mimeType": "text/markdown",
+      "description": "Machine-readable capabilities and links overview."
+    }
+  ]
+}

@@ -27,30 +27,57 @@ import {
   GridworldPresetKind,
   GridworldTileKind,
 } from '../types/algorithm';
-import { getPlugin } from '../algorithms/registry';
 import {
-  generateSpatialVisionDataset,
-  getPresetGrid,
-  shiftGridRight,
-  applyNoiseAndContrast,
-  VisionPresetKind,
-} from '../datasets/visionGrid';
-import {
-  generateSequenceDataset,
-  toggleTokenMask,
-} from '../datasets/sequenceTokens';
-import {
-  createRLGridworldDataset,
-  paintGridworldTile,
-} from '../datasets/rlGridworld';
+  AlgorithmCatalogMetadata,
+  getCatalogEntry,
+  getLoadedPlugin,
+  loadPlugin,
+  registerPlugin,
+  resolveAlgorithmId,
+} from '../algorithms/catalog';
+import { linearSvmPlugin } from '../algorithms/stage01/linearSvm';
+import type { VisionPresetKind } from '../datasets/visionGrid';
 import { HistoryRingBuffer } from '../utils/ringBuffer';
 import { DirtyManager } from '../rendering/dirty-manager';
 import { useEngineWorker } from '../worker/useEngineWorker';
 import { serializeToUrlHash, parseUrlHash } from '../utils/urlState';
-import { clampThreshold } from '../algorithms/stage01/logisticRegression';
+import { clampThreshold } from '../algorithms/stage01/crossTask';
+
+registerPlugin(linearSvmPlugin);
+
+function createMetadataFallbackPlugin(meta: AlgorithmCatalogMetadata): AlgorithmPlugin<any, any> {
+  return {
+    id: meta.id,
+    name: meta.name,
+    shortCode: meta.shortCode,
+    stage: meta.stageId,
+    taskType: meta.taskType,
+    executionMode: meta.executionMode ?? 'epoch-loop',
+    description: meta.description,
+    primaryParams: [],
+    advancedParams: [],
+    symbolicLinks: [],
+    init: () => ({}),
+    step: (state) => ({ state, epoch: 0, metrics: { trainLoss: 0, testLoss: 0 } }),
+    predict: () => 0,
+    loss: () => ({ trainLoss: 0, testLoss: 0 }),
+    getVisualArtifacts: () => [],
+    explain: () => ({
+      summary: meta.description,
+      coreAssumption: '',
+      whenItFails: '',
+      microLog: ['', '', ''],
+      mathLatex: { objective: '', lossOrUpdate: '' },
+      codeSnippet: { sklearn: '', pytorch: '' },
+    }),
+    serializeSnapshot: () => new Float32Array(0),
+    restoreSnapshot: (_buf, currentState) => currentState,
+  };
+}
 
 export const AppWorkbenchShell: React.FC = () => {
   const initialUrlState = useRef(parseUrlHash()).current;
+  const initialAlgoId = resolveAlgorithmId(initialUrlState.algo || 'linear-svm');
 
   // Theme: Paper / Carbon
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -70,17 +97,18 @@ export const AppWorkbenchShell: React.FC = () => {
   // Reduced motion
   const [reducedMotion, setReducedMotion] = useState(false);
 
-  // Selected Algorithm
-  const [selectedAlgorithmId, setSelectedAlgorithmId] = useState<string>(
-    initialUrlState.algo || 'linear-svm'
-  );
+  // Selected Algorithm + Dynamic Plugin Cache Tick
+  const [selectedAlgorithmId, setSelectedAlgorithmId] = useState<string>(initialAlgoId);
+  const [, setPluginVersion] = useState(0);
+  const currentCatalogMeta = getCatalogEntry(selectedAlgorithmId) || getCatalogEntry('linear-svm')!;
   const currentAlgorithm: AlgorithmPlugin =
-    getPlugin(selectedAlgorithmId) || getPlugin('linear-svm')!;
+    getLoadedPlugin(selectedAlgorithmId) ||
+    (selectedAlgorithmId === 'linear-svm' ? linearSvmPlugin : createMetadataFallbackPlugin(currentCatalogMeta));
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   // Hyperparameters (seeded with initial plugin defaults overlaid by URL params)
   const [hyperparams, setHyperparams] = useState<Record<string, number | string>>(() => {
-    const initialPlugin = getPlugin(initialUrlState.algo || 'linear-svm');
+    const initialPlugin = getLoadedPlugin(initialAlgoId);
     const pluginDefaults: Record<string, number | string> = {};
     if (initialPlugin) {
       for (const hp of [...initialPlugin.primaryParams, ...initialPlugin.advancedParams]) {
@@ -120,36 +148,77 @@ export const AppWorkbenchShell: React.FC = () => {
 
   const isCurrentAlgoRegression = currentAlgorithm.taskType === 'regression';
 
-  // Dataset Options & Points
-  const [datasetOptions, setDatasetOptions] = useState<DatasetOptions>({
-    kind: (initialUrlState.dataset as any) || (isCurrentAlgoRegression ? 'sine-wave' : 'linear-blobs'),
-    sampleCount: 160,
-    noise: initialUrlState.noise ?? 0.1,
-    testSplit: initialUrlState.split ?? 0.2,
-    seed: initialUrlState.seed ?? 42,
-    numClasses: 2,
-    scaling: initialUrlState.scale ?? 'raw',
-    stretchX2: initialUrlState.stretch ?? false,
-  });
+  // Initial Dataset Options & Points computed once synchronously (avoids redundant mount re-render)
+  const initialDatasetBundle = useRef<{
+    options: DatasetOptions;
+    train: DataPoint2D[];
+    test: DataPoint2D[];
+  } | null>(null);
+  if (!initialDatasetBundle.current) {
+    let kind = (initialUrlState.dataset as any) || (isCurrentAlgoRegression ? 'sine-wave' : 'linear-blobs');
+    if (!initialUrlState.dataset) {
+      const dsTask = getDatasetTaskType(kind);
+      if (isCurrentAlgoRegression && dsTask !== 'regression') {
+        kind = 'sine-wave';
+      } else if (!isCurrentAlgoRegression && dsTask === 'regression') {
+        kind = 'linear-blobs';
+      }
+    }
+    const opts: DatasetOptions = {
+      kind,
+      sampleCount: 160,
+      noise: initialUrlState.noise ?? 0.1,
+      testSplit: initialUrlState.split ?? 0.2,
+      seed: initialUrlState.seed ?? 42,
+      numClasses: 2,
+      scaling: initialUrlState.scale ?? 'raw',
+      stretchX2: initialUrlState.stretch ?? false,
+    };
+    const generated = generateTabular2dDataset(opts);
+    initialDatasetBundle.current = { options: opts, train: generated.train, test: generated.test };
+  }
 
-  const [trainData, setTrainData] = useState<DataPoint2D[]>([]);
-  const [testData, setTestData] = useState<DataPoint2D[]>([]);
+  const [datasetOptions, setDatasetOptions] = useState<DatasetOptions>(initialDatasetBundle.current.options);
+  const [trainData, setTrainData] = useState<DataPoint2D[]>(initialDatasetBundle.current.train);
+  const [testData, setTestData] = useState<DataPoint2D[]>(initialDatasetBundle.current.test);
 
-  // Stage 05 Spatial Vision Dataset
-  const [spatialVision, setSpatialVisionState] = useState<SpatialVisionDataset>(() =>
-    generateSpatialVisionDataset({ preset: 'digit' })
-  );
-
-  // Stage 06 Sequence Dataset
-  const [sequenceTokens, setSequenceTokensState] = useState<SequenceDataset>(() =>
-    generateSequenceDataset({ preset: 'coreference' })
-  );
-
-  // Stage 07 RL Gridworld Dataset & Brush
-  const [rlGridworld, setRLGridworldState] = useState<RLGridworldDataset>(() =>
-    createRLGridworldDataset({ preset: 'cliff-walking' })
-  );
+  // Lazy-loaded Stage 05/06/07 Datasets (generated only when visiting those stages)
+  const [spatialVision, setSpatialVisionState] = useState<SpatialVisionDataset | undefined>(undefined);
+  const [sequenceTokens, setSequenceTokensState] = useState<SequenceDataset | undefined>(undefined);
+  const [rlGridworld, setRLGridworldState] = useState<RLGridworldDataset | undefined>(undefined);
   const [activeBrush, setActiveBrush] = useState<GridworldTileKind>('wall');
+
+  const ensureStageDataset = useCallback(
+    async (
+      stage: string,
+      seedVal: number = datasetOptions.seed
+    ): Promise<{
+      vision?: SpatialVisionDataset;
+      seq?: SequenceDataset;
+      rl?: RLGridworldDataset;
+    }> => {
+      if (stage === 'vision-grid' && !spatialVision) {
+        const { generateSpatialVisionDataset } = await import('../datasets/visionGrid');
+        const created = generateSpatialVisionDataset({ preset: 'digit' });
+        setSpatialVisionState(created);
+        return { vision: created };
+      }
+      if (stage === 'sequence-attn' && !sequenceTokens) {
+        const { generateSequenceDataset } = await import('../datasets/sequenceTokens');
+        const created = generateSequenceDataset({ preset: 'coreference' });
+        setSequenceTokensState(created);
+        return { seq: created };
+      }
+      if (stage === 'rl-gridworld' && !rlGridworld) {
+        const { createRLGridworldDataset } = await import('../datasets/rlGridworld');
+        const created = createRLGridworldDataset({ preset: 'cliff-walking', seed: seedVal });
+        setRLGridworldState(created);
+        return { rl: created };
+      }
+      return { vision: spatialVision, seq: sequenceTokens, rl: rlGridworld };
+    },
+    [datasetOptions.seed, spatialVision, sequenceTokens, rlGridworld]
+  );
 
   // Pointer Tool Mode & Active Class
   const [pointerMode, setPointerMode] = useState<PointerToolMode>('add-drag');
@@ -157,7 +226,9 @@ export const AppWorkbenchShell: React.FC = () => {
   const [showTestData, setShowTestData] = useState<boolean>(true);
 
   // Decision Threshold tau
-  const [decisionThreshold, setDecisionThreshold] = useState<number>(0);
+  const [decisionThreshold, setDecisionThreshold] = useState<number>(() =>
+    initialAlgoId === 'logistic-regression' || initialAlgoId === 'decision-tree' ? 0.5 : 0
+  );
 
   // Memory & Dirty Flag Management
   const ringBufferRef = useRef<HistoryRingBuffer>(new HistoryRingBuffer(300, 16));
@@ -226,7 +297,7 @@ export const AppWorkbenchShell: React.FC = () => {
       if (seqArt && typeof seqArt.selectedStep === 'number') {
         const nextIdx = seqArt.selectedStep;
         setSequenceTokensState((prev) =>
-          prev.selectedTokenIndex === nextIdx ? prev : { ...prev, selectedTokenIndex: nextIdx }
+          !prev || prev.selectedTokenIndex === nextIdx ? prev : { ...prev, selectedTokenIndex: nextIdx }
         );
       }
 
@@ -271,7 +342,7 @@ export const AppWorkbenchShell: React.FC = () => {
       if (seqArt && typeof seqArt.selectedStep === 'number') {
         const nextIdx = seqArt.selectedStep;
         setSequenceTokensState((prev) =>
-          prev.selectedTokenIndex === nextIdx ? prev : { ...prev, selectedTokenIndex: nextIdx }
+          !prev || prev.selectedTokenIndex === nextIdx ? prev : { ...prev, selectedTokenIndex: nextIdx }
         );
       }
       if (gridBuffer && gridBuffer.length > 0) {
@@ -300,41 +371,53 @@ export const AppWorkbenchShell: React.FC = () => {
 
   // Initial mount
   useEffect(() => {
-    const plugin = getPlugin(selectedAlgorithmId);
-    let options = datasetOptions;
-    const isAlgoRegression = plugin?.taskType === 'regression';
-    const isDatasetRegression = getDatasetTaskType(options.kind) === 'regression';
-    if (!initialUrlState.dataset) {
-      if (isAlgoRegression && !isDatasetRegression) {
-        options = { ...options, kind: 'sine-wave' };
-        setDatasetOptions(options);
-      } else if (!isAlgoRegression && isDatasetRegression) {
-        options = { ...options, kind: 'linear-blobs' };
-        setDatasetOptions(options);
+    let cancelled = false;
+    const boot = async () => {
+      const stageDatasets = await ensureStageDataset(currentAlgorithm.stage, datasetOptions.seed);
+      if (cancelled) return;
+
+      if (!getLoadedPlugin(selectedAlgorithmId)) {
+        // Initialize worker immediately (worker loads plugin asynchronously too)
+        initAlgorithm(
+          selectedAlgorithmId,
+          hyperparamsRef.current,
+          trainData,
+          testData,
+          datasetOptions.seed,
+          stageDatasets.vision ?? spatialVision,
+          stageDatasets.seq ?? sequenceTokens,
+          stageDatasets.rl ?? rlGridworld
+        );
+
+        const loaded = await loadPlugin(selectedAlgorithmId);
+        if (cancelled || !loaded) return;
+
+        const pluginDefaults: Record<string, number | string> = {};
+        for (const hp of [...loaded.primaryParams, ...loaded.advancedParams]) {
+          pluginDefaults[hp.id] = hp.default;
+        }
+        const merged = { ...pluginDefaults, ...hyperparamsRef.current };
+        hyperparamsRef.current = merged;
+        setHyperparams(merged);
+        setPluginVersion((v) => v + 1);
+        return;
       }
-    }
 
-    if (selectedAlgorithmId === 'logistic-regression' || selectedAlgorithmId === 'decision-tree') {
-      setDecisionThreshold(0.50);
-    }
-
-    const { train, test } = generateTabular2dDataset(options);
-    setTrainData(train);
-    setTestData(test);
-    setArtifacts([]);
-    setGridValues(null);
-    setLatestMetrics(null);
-
-    initAlgorithm(
-      selectedAlgorithmId,
-      hyperparams,
-      train,
-      test,
-      options.seed,
-      spatialVision,
-      sequenceTokens,
-      rlGridworld
-    );
+      initAlgorithm(
+        selectedAlgorithmId,
+        hyperparamsRef.current,
+        trainData,
+        testData,
+        datasetOptions.seed,
+        stageDatasets.vision ?? spatialVision,
+        stageDatasets.seq ?? sequenceTokens,
+        stageDatasets.rl ?? rlGridworld
+      );
+    };
+    void boot();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const lastAlgoRef = useRef(selectedAlgorithmId);
@@ -458,17 +541,21 @@ export const AppWorkbenchShell: React.FC = () => {
 
   // Algorithm Switching
   const handleSelectAlgorithm = async (algoId: string) => {
+    const canonicalId = resolveAlgorithmId(algoId);
     if (isRunning) pause();
     setScrubIndex(null);
-    setSelectedAlgorithmId(algoId);
+    setSelectedAlgorithmId(canonicalId);
     setArtifacts([]);
     setGridValues(null);
     setLatestMetrics(null);
     setIsConverged(false);
     ringBufferRef.current.clear();
 
-    const plugin = getPlugin(algoId);
+    const plugin = getLoadedPlugin(canonicalId) ?? (await loadPlugin(canonicalId));
     if (!plugin) return;
+    setPluginVersion((v) => v + 1);
+
+    const stageDatasets = await ensureStageDataset(plugin.stage, datasetOptions.seed);
 
     // Check dataset compatibility with taskType
     let currentTrain = trainData;
@@ -500,7 +587,7 @@ export const AppWorkbenchShell: React.FC = () => {
       }
     }
 
-    if (algoId === 'logistic-regression' || algoId === 'decision-tree') {
+    if (canonicalId === 'logistic-regression' || canonicalId === 'decision-tree') {
       setDecisionThreshold(0.50);
     } else {
       setDecisionThreshold(0.0);
@@ -514,10 +601,10 @@ export const AppWorkbenchShell: React.FC = () => {
     if (plugin.stage === 'tree-partition') {
       const activeTask = getDatasetTaskType(currentOptions.kind);
       defaults.task = activeTask;
-      if (algoId === 'decision-tree' && activeTask === 'regression') {
+      if (canonicalId === 'decision-tree' && activeTask === 'regression') {
         defaults.criterion = 'mse';
       }
-      if (algoId === 'stacking' && activeTask === 'regression') {
+      if (canonicalId === 'stacking' && activeTask === 'regression') {
         defaults.metaLearner = 'ridge';
       }
     }
@@ -525,24 +612,28 @@ export const AppWorkbenchShell: React.FC = () => {
     setHyperparams(defaults);
 
     initAlgorithm(
-      algoId,
+      canonicalId,
       defaults,
       currentTrain,
       currentTest,
       currentOptions.seed,
-      spatialVision,
-      sequenceTokens,
-      rlGridworld
+      stageDatasets.vision ?? spatialVision,
+      stageDatasets.seq ?? sequenceTokens,
+      stageDatasets.rl ?? rlGridworld
     );
   };
   handleSelectAlgorithmRef.current = handleSelectAlgorithm;
 
   const handleSelectVisionPreset = useCallback(
-    (preset: VisionPresetKind, variant: 'default' | 'digit0' | 'digit7' = 'default') => {
+    async (preset: VisionPresetKind, variant: 'default' | 'digit0' | 'digit7' = 'default') => {
+      const { getPresetGrid, applyNoiseAndContrast, generateSpatialVisionDataset } = await import(
+        '../datasets/visionGrid'
+      );
+      const current = spatialVision ?? generateSpatialVisionDataset({ preset: 'digit' });
       const base = getPresetGrid(preset, variant);
-      const processed = applyNoiseAndContrast(base, spatialVision.noise, spatialVision.contrast, spatialVision.inverted);
+      const processed = applyNoiseAndContrast(base, current.noise, current.contrast, current.inverted);
       const updated: SpatialVisionDataset = {
-        ...spatialVision,
+        ...current,
         preset,
         inputGrid: processed,
       };
@@ -554,9 +645,13 @@ export const AppWorkbenchShell: React.FC = () => {
   );
 
   const handleUpdateSpatialVision = useCallback(
-    (updater: (prev: SpatialVisionDataset) => SpatialVisionDataset) => {
+    async (updater: (prev: SpatialVisionDataset) => SpatialVisionDataset) => {
+      const { getPresetGrid, applyNoiseAndContrast, generateSpatialVisionDataset } = await import(
+        '../datasets/visionGrid'
+      );
       setSpatialVisionState((prev) => {
-        const next = updater(prev);
+        const basePrev = prev ?? generateSpatialVisionDataset({ preset: 'digit' });
+        const next = updater(basePrev);
         const base = getPresetGrid(next.preset);
         const processed = applyNoiseAndContrast(base, next.noise, next.contrast, next.inverted);
         const full = { ...next, inputGrid: processed };
@@ -568,8 +663,10 @@ export const AppWorkbenchShell: React.FC = () => {
     [setSpatialVision]
   );
 
-  const handleShiftInputRight = useCallback(() => {
+  const handleShiftInputRight = useCallback(async () => {
+    const { shiftGridRight } = await import('../datasets/visionGrid');
     setSpatialVisionState((prev) => {
+      if (!prev) return prev;
       const shifted = shiftGridRight(prev.inputGrid, 1);
       const next: SpatialVisionDataset = { ...prev, preset: 'custom', inputGrid: shifted };
       setSpatialVision(next, false);
@@ -581,6 +678,7 @@ export const AppWorkbenchShell: React.FC = () => {
   const handleUpdateInputGrid = useCallback(
     (newGrid: Float32Array) => {
       setSpatialVisionState((prev) => {
+        if (!prev) return prev;
         const next: SpatialVisionDataset = { ...prev, preset: 'custom', inputGrid: newGrid };
         setSpatialVision(next, false);
         return next;
@@ -591,19 +689,22 @@ export const AppWorkbenchShell: React.FC = () => {
   );
 
   const handleSelectSequencePreset = useCallback(
-    (preset: SequencePresetKind) => {
-      const updated = generateSequenceDataset({ preset, noise: sequenceTokens.noise });
+    async (preset: SequencePresetKind) => {
+      const { generateSequenceDataset } = await import('../datasets/sequenceTokens');
+      const updated = generateSequenceDataset({ preset, noise: sequenceTokens?.noise ?? 0 });
       setSequenceTokensState(updated);
       setSequenceTokens(updated, true);
       dirtyManagerRef.current.markDirty();
     },
-    [sequenceTokens.noise, setSequenceTokens]
+    [sequenceTokens?.noise, setSequenceTokens]
   );
 
   const handleUpdateSequenceDataset = useCallback(
-    (updater: (prev: SequenceDataset) => SequenceDataset) => {
+    async (updater: (prev: SequenceDataset) => SequenceDataset) => {
+      const { generateSequenceDataset } = await import('../datasets/sequenceTokens');
       setSequenceTokensState((prev) => {
-        const next = updater(prev);
+        const basePrev = prev ?? generateSequenceDataset({ preset: 'coreference' });
+        const next = updater(basePrev);
         const generated = generateSequenceDataset({
           preset: next.preset,
           length: next.length,
@@ -619,8 +720,10 @@ export const AppWorkbenchShell: React.FC = () => {
   );
 
   const handleToggleTokenMask = useCallback(
-    (index: number) => {
+    async (index: number) => {
+      const { toggleTokenMask } = await import('../datasets/sequenceTokens');
       setSequenceTokensState((prev) => {
+        if (!prev) return prev;
         const next = toggleTokenMask(prev, index);
         setSequenceTokens(next, true);
         return next;
@@ -633,6 +736,7 @@ export const AppWorkbenchShell: React.FC = () => {
   const handleSelectFocusToken = useCallback(
     (index: number) => {
       setSequenceTokensState((prev) => {
+        if (!prev) return prev;
         const next = { ...prev, selectedTokenIndex: index };
         setSequenceTokens(next, true);
         return next;
@@ -643,7 +747,8 @@ export const AppWorkbenchShell: React.FC = () => {
   );
 
   const handleSelectGridworldPreset = useCallback(
-    (preset: GridworldPresetKind) => {
+    async (preset: GridworldPresetKind) => {
+      const { createRLGridworldDataset } = await import('../datasets/rlGridworld');
       setScrubIndex(null);
       setIsConverged(false);
       ringBufferRef.current.clear();
@@ -659,23 +764,27 @@ export const AppWorkbenchShell: React.FC = () => {
   );
 
   const handleUpdateRLGridworld = useCallback(
-    (updater: (prev: RLGridworldDataset) => RLGridworldDataset) => {
+    async (updater: (prev: RLGridworldDataset) => RLGridworldDataset) => {
+      const { createRLGridworldDataset } = await import('../datasets/rlGridworld');
       setScrubIndex(null);
       setIsConverged(false);
       ringBufferRef.current.clear();
       setRLGridworldState((prev) => {
-        const next = updater(prev);
+        const basePrev = prev ?? createRLGridworldDataset({ preset: 'cliff-walking', seed: datasetOptions.seed });
+        const next = updater(basePrev);
         setRLGridworld(next, true, false);
         return next;
       });
       dirtyManagerRef.current.markDirty();
     },
-    [setRLGridworld]
+    [datasetOptions.seed, setRLGridworld]
   );
 
   const handlePaintGridworldTile = useCallback(
-    (row: number, col: number, tile: GridworldTileKind) => {
+    async (row: number, col: number, tile: GridworldTileKind) => {
+      const { paintGridworldTile } = await import('../datasets/rlGridworld');
       setRLGridworldState((prev) => {
+        if (!prev) return prev;
         const next = paintGridworldTile(prev, row, col, tile);
         // In-situ adaptation: preserves learned Q-values/weights while resetting agent to start!
         setRLGridworld(next, true, true);
@@ -1057,7 +1166,7 @@ export const AppWorkbenchShell: React.FC = () => {
           onDragEnd={handleDragEnd}
           predictValueAtPoint={predictValueAtPoint}
           onSyncCentroids={syncCentroids}
-          inputGrid={spatialVision.inputGrid}
+          inputGrid={spatialVision?.inputGrid}
           sequenceDataset={sequenceTokens}
           rlGridworld={rlGridworld}
           activeBrush={activeBrush}

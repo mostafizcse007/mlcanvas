@@ -1,5 +1,5 @@
 import { DataPoint2D } from '../datasets/tabular2d';
-import { getPlugin, loadPlugin } from '../algorithms/registry';
+import { getLoadedPlugin as getPlugin, loadPlugin } from '../algorithms/catalog';
 
 // Internal Worker State
 let currentAlgorithmId = 'linear-svm';

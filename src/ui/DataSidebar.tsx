@@ -19,8 +19,7 @@ import {
 } from '../types/algorithm';
 import { ThemeMode } from '../types/theme';
 import { HyperparameterLabel } from './HyperparameterLabel';
-import { getPresetGrid, VisionPresetKind } from '../datasets/visionGrid';
-import { generatePresetTiles } from '../datasets/rlGridworld';
+import type { VisionPresetKind } from '../datasets/visionGrid';
 import {
   Lock,
   Unlock,
@@ -62,10 +61,22 @@ interface DataSidebarProps {
 }
 
 const GridworldThumbnail: React.FC<{ preset: GridworldPresetKind; isCarbon: boolean }> = ({ preset, isCarbon }) => {
-  const { tiles } = generatePresetTiles(preset);
+  const [tiles, setTiles] = useState<Uint8Array | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    import('../datasets/rlGridworld').then(({ generatePresetTiles }) => {
+      if (!cancelled) {
+        setTiles(generatePresetTiles(preset).tiles);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [preset]);
+
   return (
     <svg viewBox="0 0 36 36" className="w-[32px] h-[32px] block border border-[var(--border-hairline)] bg-[var(--bg-canvas)]">
-      {Array.from({ length: 6 }).map((_, r) =>
+      {tiles && Array.from({ length: 6 }).map((_, r) =>
         Array.from({ length: 6 }).map((_, c) => {
           const idx = r * 6 + c;
           const t = tiles[idx];
@@ -94,26 +105,34 @@ const GridworldThumbnail: React.FC<{ preset: GridworldPresetKind; isCarbon: bool
   );
 };
 
-const VisionThumbnail: React.FC<{ grid: Float32Array; isCarbon: boolean }> = ({ grid, isCarbon }) => {
+const VisionThumbnail: React.FC<{ preset: VisionPresetKind; variant: 'default' | 'digit0' | 'digit7'; isCarbon: boolean }> = ({ preset, variant, isCarbon }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const imgData = ctx.createImageData(16, 16);
-    const data = imgData.data;
-    for (let i = 0; i < 256; i++) {
-      const v = grid[i];
-      const val = isCarbon ? (v > 0.5 ? 255 : 17) : (v > 0.5 ? 17 : 255);
-      const offset = i * 4;
-      data[offset] = val;
-      data[offset + 1] = val;
-      data[offset + 2] = val;
-      data[offset + 3] = 255;
-    }
-    ctx.putImageData(imgData, 0, 0);
-  }, [grid, isCarbon]);
+    let cancelled = false;
+    import('../datasets/visionGrid').then(({ getPresetGrid }) => {
+      if (cancelled) return;
+      const grid = getPresetGrid(preset, variant);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const imgData = ctx.createImageData(16, 16);
+      const data = imgData.data;
+      for (let i = 0; i < 256; i++) {
+        const v = grid[i];
+        const val = isCarbon ? (v > 0.5 ? 255 : 17) : (v > 0.5 ? 17 : 255);
+        const offset = i * 4;
+        data[offset] = val;
+        data[offset + 1] = val;
+        data[offset + 2] = val;
+        data[offset + 3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [preset, variant, isCarbon]);
 
   return (
     <canvas
@@ -187,51 +206,55 @@ export const DataSidebar: React.FC<DataSidebarProps> = ({
 
   const thumbCanvasesRef = useRef<Map<DatasetKind, HTMLCanvasElement>>(new Map());
 
-  // Render Mini Dataset Thumbnails
+  // Render Mini Dataset Thumbnails in a yielded post-mount task so initial mount stays snappy
   useEffect(() => {
-    currentKinds.forEach((k) => {
-      const canvas = thumbCanvasesRef.current.get(k.kind);
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+    const timerId = window.setTimeout(() => {
+      currentKinds.forEach((k) => {
+        const canvas = thumbCanvasesRef.current.get(k.kind);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
 
-      const w = canvas.width;
-      const h = canvas.height;
+        const w = canvas.width;
+        const h = canvas.height;
 
-      ctx.fillStyle = isCarbon ? '#131312' : '#FAF9F5';
-      ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = isCarbon ? '#131312' : '#FAF9F5';
+        ctx.fillRect(0, 0, w, h);
 
-      ctx.strokeStyle = isCarbon ? '#2E2E2B' : '#DCDAD3';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+        ctx.strokeStyle = isCarbon ? '#2E2E2B' : '#DCDAD3';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
 
-      // Generate small thumbnail sample
-      const sample = generateTabular2dDataset({
-        kind: k.kind,
-        sampleCount: 40,
-        noise: 0.05,
-        testSplit: 0,
-        seed: options.seed,
-        numClasses: 2,
-        scaling: 'raw',
-        stretchX2: false,
+        // Generate small thumbnail sample
+        const sample = generateTabular2dDataset({
+          kind: k.kind,
+          sampleCount: 40,
+          noise: 0.05,
+          testSplit: 0,
+          seed: options.seed,
+          numClasses: 2,
+          scaling: 'raw',
+          stretchX2: false,
+        });
+
+        const pigmentA = isCarbon ? '#C26752' : '#D94E34';
+        const pigmentB = isCarbon ? '#5276B8' : '#1E40AF';
+        const scale = (w * 0.42) / 6.0;
+        const cx = w / 2;
+        const cy = h / 2;
+
+        for (const p of sample.train) {
+          const px = cx + p.x1 * scale;
+          const py = cy - p.x2 * scale;
+          ctx.fillStyle = activeTab === 'regression' ? pigmentA : (p.y >= 0 ? pigmentA : pigmentB);
+          ctx.beginPath();
+          ctx.arc(px, py, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
       });
+    }, 0);
 
-      const pigmentA = isCarbon ? '#C26752' : '#D94E34';
-      const pigmentB = isCarbon ? '#5276B8' : '#1E40AF';
-      const scale = (w * 0.42) / 6.0;
-      const cx = w / 2;
-      const cy = h / 2;
-
-      for (const p of sample.train) {
-        const px = cx + p.x1 * scale;
-        const py = cy - p.x2 * scale;
-        ctx.fillStyle = activeTab === 'regression' ? pigmentA : (p.y >= 0 ? pigmentA : pigmentB);
-        ctx.beginPath();
-        ctx.arc(px, py, 1.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
+    return () => window.clearTimeout(timerId);
   }, [options.seed, isCarbon, activeTab]);
 
   const handleToggleSeedLock = () => {
@@ -268,7 +291,6 @@ export const DataSidebar: React.FC<DataSidebarProps> = ({
               { id: 'checkerboard', label: 'Checkerboard (Hi-Freq)', variant: 'default' as const },
             ].map((p) => {
               const isSelected = (spatialVision?.preset || 'digit') === p.id;
-              const previewGrid = getPresetGrid(p.id as VisionPresetKind, p.variant);
 
               return (
                 <button
@@ -283,7 +305,7 @@ export const DataSidebar: React.FC<DataSidebarProps> = ({
                   aria-label={`Select vision preset: ${p.label}`}
                 >
                   {/* 16x16 Mini Raster Preview */}
-                  <VisionThumbnail grid={previewGrid} isCarbon={isCarbon} />
+                  <VisionThumbnail preset={p.id as VisionPresetKind} variant={p.variant} isCarbon={isCarbon} />
                   <span className="font-mono text-[9px] text-[var(--text-primary)] text-center leading-tight truncate w-full">
                     {p.id === 'digit' ? 'Digit 7 vs 0' : p.id === 'edges' ? 'Edge Filters' : p.id === 'corner-cross' ? 'Corner & Cross' : 'Checkerboard'}
                   </span>

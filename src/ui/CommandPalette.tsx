@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ALGORITHM_CATALOG, STAGES } from '../algorithms/registry';
+import { ALGORITHM_CATALOG_METADATA as ALGORITHM_CATALOG, STAGES } from '../algorithms/catalog';
 import { Search, X, Check, ArrowRight } from 'lucide-react';
 
 interface CommandPaletteProps {

@@ -3,6 +3,11 @@ import { DataPoint2D, PointerToolMode } from '../datasets/tabular2d';
 import { VisualArtifact, AlgorithmPlugin, TaskType } from '../types/algorithm';
 import { ThemeMode } from '../types/theme';
 import { DirtyManager } from './dirty-manager';
+import {
+  observeElementSize,
+  subscribeDirtyRender,
+  syncCanvasBufferSize,
+} from './canvasUtils';
 import { populateHeatmapImageData } from './color-maps';
 import { gaussianPdf, euclideanDist, manhattanDist } from '../utils/math';
 import { getVisibleDataPoints, hitTestDataPoints, renderDataPoints2D } from './pointUtils';
@@ -286,8 +291,21 @@ export const Stage01Canvas: React.FC<Stage01CanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
-  const offscreenCanvasRef = useRef<HTMLCanvasElement>(document.createElement('canvas'));
-  const uncertaintyCanvasRef = useRef<HTMLCanvasElement>(document.createElement('canvas'));
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const uncertaintyCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const getOffscreenCanvas = () => {
+    if (!offscreenCanvasRef.current) {
+      offscreenCanvasRef.current = document.createElement('canvas');
+    }
+    return offscreenCanvasRef.current;
+  };
+  const getUncertaintyCanvas = () => {
+    if (!uncertaintyCanvasRef.current) {
+      uncertaintyCanvasRef.current = document.createElement('canvas');
+    }
+    return uncertaintyCanvasRef.current;
+  };
+  const canvasSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
   const cachedImageDataRef = useRef<ImageData | null>(null);
 
   const [hoverCoord, setHoverCoord] = useState<{ x: number; y: number } | null>(null);
@@ -333,37 +351,21 @@ export const Stage01Canvas: React.FC<Stage01CanvasProps> = ({
     isRegressionDataset &&
     has1DRegressionCoords;
 
-  // Resize handling with devicePixelRatio cap of 2
-  const resizeCanvas = useCallback(() => {
-    const canvas = mainCanvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-
-    const rect = container.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(rect.height * dpr);
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
-
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.scale(dpr, dpr);
-    }
-    dirtyManager.markDirty();
-  }, [dirtyManager]);
-
+  // Resize handling via ResizeObserver contentRect (zero forced reflow or inline style writes)
   useEffect(() => {
-    resizeCanvas();
-    const ro = new ResizeObserver(() => resizeCanvas());
-    if (containerRef.current) ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, [resizeCanvas]);
+    return observeElementSize(containerRef.current, ({ width, height }) => {
+      canvasSizeRef.current = { width, height };
+      const canvas = mainCanvasRef.current;
+      if (canvas) {
+        syncCanvasBufferSize(canvas, width, height, 2);
+      }
+      dirtyManager.markDirty();
+    });
+  }, [dirtyManager]);
 
   // Update low-res offscreen heatmap buffer
   useEffect(() => {
-    const offCanvas = offscreenCanvasRef.current;
+    const offCanvas = getOffscreenCanvas();
     if (!gridValues || gridValues.length === 0) {
       if (offCanvas.width > 0 && offCanvas.height > 0) {
         const offCtx = offCanvas.getContext('2d');
@@ -403,36 +405,37 @@ export const Stage01Canvas: React.FC<Stage01CanvasProps> = ({
   const toCoordX = (px: number, w: number) => VIEWPORT.minX + (px / w) * (VIEWPORT.maxX - VIEWPORT.minX);
   const toCoordY = (py: number, h: number) => VIEWPORT.maxY - (py / h) * (VIEWPORT.maxY - VIEWPORT.minY);
 
-  // Render Loop (0% Idle CPU)
+  // On-demand Dirty Render Loop (true 0% Idle CPU)
   useEffect(() => {
-    let animId: number;
-
     const render = () => {
-      if (dirtyManager.checkAndClear()) {
-        const canvas = mainCanvasRef.current;
-        const ctx = canvas?.getContext('2d');
-        if (canvas && ctx) {
-          const w = parseFloat(canvas.style.width) || canvas.width;
-          const h = parseFloat(canvas.style.height) || canvas.height;
+      const canvas = mainCanvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx) return;
 
-          // 1. Clear Background
-          ctx.fillStyle = isCarbon ? '#131312' : '#FAF9F5';
-          ctx.fillRect(0, 0, w, h);
+      const w = canvasSizeRef.current.width;
+      const h = canvasSizeRef.current.height;
+      if (w <= 0 || h <= 0) return;
 
-          // 2. Draw Upscaled Heatmap Buffer (Only for classification and 2D surface regression)
-          const shouldDrawHeatmap =
-            !is1DRegression &&
-            gridValues &&
-            gridValues.length > 0 &&
-            offscreenCanvasRef.current.width > 0;
+      // 1. Clear Background
+      ctx.fillStyle = isCarbon ? '#131312' : '#FAF9F5';
+      ctx.fillRect(0, 0, w, h);
 
-          if (shouldDrawHeatmap) {
-            ctx.save();
-            ctx.imageSmoothingEnabled = !discretize;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(offscreenCanvasRef.current, 0, 0, w, h);
-            ctx.restore();
-          }
+      // 2. Draw Upscaled Heatmap Buffer (Only for classification and 2D surface regression)
+      const offCanvas = offscreenCanvasRef.current;
+      const shouldDrawHeatmap =
+        !is1DRegression &&
+        gridValues &&
+        gridValues.length > 0 &&
+        offCanvas !== null &&
+        offCanvas.width > 0;
+
+      if (shouldDrawHeatmap && offCanvas) {
+        ctx.save();
+        ctx.imageSmoothingEnabled = !discretize;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(offCanvas, 0, 0, w, h);
+        ctx.restore();
+      }
 
           // 3. Exposed 1px Swiss Grid Hairlines
           ctx.save();
@@ -545,14 +548,9 @@ export const Stage01Canvas: React.FC<Stage01CanvasProps> = ({
           if (artifacts && artifacts.length > 0) {
             renderNumericDiagnosticsOverlay(ctx, artifacts, w, h, isCarbon);
           }
-        }
-      }
-
-      animId = requestAnimationFrame(render);
     };
 
-    animId = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animId);
+    return subscribeDirtyRender(dirtyManager, render);
   }, [
     dirtyManager,
     theme,
@@ -774,7 +772,7 @@ export const Stage01Canvas: React.FC<Stage01CanvasProps> = ({
           const bounds: [number, number, number, number] = [VIEWPORT.minX, VIEWPORT.maxX, VIEWPORT.minY, VIEWPORT.maxY];
           const uncField = compute2DGpUncertaintyField(art.trainingX, art.lengthScale, uncRes, bounds);
 
-          const uncCanvas = uncertaintyCanvasRef.current;
+          const uncCanvas = getUncertaintyCanvas();
           if (uncCanvas.width !== uncRes || uncCanvas.height !== uncRes) {
             uncCanvas.width = uncRes;
             uncCanvas.height = uncRes;

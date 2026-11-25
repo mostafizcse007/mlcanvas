@@ -5,7 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23141413' stroke-width='2'><circle cx='12' cy='12' r='10'/><line x1='12' y1='6' x2='12' y2='12'/><line x1='12' y1='12' x2='16' y2='16'/></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ML Canvas — Interactive Machine Learning Laboratory</title>
-    
+
     <meta name="description" content="ML Canvas is an interactive machine learning laboratory and visualization workbench for classical, deep, vision, sequence, and reinforcement learning algorithms." />
     <meta name="theme-color" content="#F6F5F0" />
     <meta name="robots" content="index, follow" />
@@ -40,96 +40,65 @@
         }
       }
     </script>
+
+    <!-- Critical Shell Layout CSS matching React Workbench (0 CLS, instant FCP/LCP on desktop & mobile) -->
+    <style>
+      .boot-shell { display:flex; flex-direction:column; width:100vw; height:100vh; background:#F6F5F0; color:#141413; font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; overflow:hidden; }
+      .boot-bar { height:48px; min-height:48px; border-bottom:1px solid #DCDAD3; display:flex; align-items:center; justify-content:space-between; padding:0 12px; background:#F6F5F0; flex-shrink:0; gap:8px; }
+      .boot-grid { display:grid; grid-template-columns:260px 1fr 320px; flex:1; min-height:0; background:#F6F5F0; overflow:hidden; }
+      .boot-left { border-right:1px solid #DCDAD3; background:#EFECE6; padding:12px; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+      .boot-main { flex:1; background:#FAF9F5; display:flex; flex-direction:column; min-width:0; min-height:0; }
+      .boot-right { border-left:1px solid #DCDAD3; background:#EFECE6; padding:12px; display:flex; flex-direction:column; gap:8px; overflow-y:auto; }
+      @media (max-width: 900px) {
+        .boot-shell { width:100%; height:auto; min-height:100vh; overflow:visible; }
+        .boot-bar { height:auto; min-height:44px; flex-wrap:wrap; padding:6px 10px; }
+        .boot-grid { display:flex; flex-direction:column; flex:none; overflow:visible; }
+        .boot-main { order:-1; width:100%; height:420px; min-height:360px; flex:none; border-bottom:1px solid #DCDAD3; }
+        .boot-left { width:100%; border-right:none; border-bottom:1px solid #DCDAD3; }
+        .boot-right { width:100%; border-left:none; }
+      }
+    </style>
   </head>
   <body>
     <div id="root">
       <!-- Instant Pre-Render Shell for Sub-Second FCP & LCP -->
-      <div style="display:flex; flex-direction:column; width:100vw; height:100vh; background:#F6F5F0; color:#141413; font-family:'Inter',system-ui,-apple-system,sans-serif; overflow:hidden;">
-        <!-- Top Control Bar Shell -->
-        <header style="height:38px; border-bottom:1px solid #DCDAD3; display:flex; align-items:center; justify-content:space-between; padding:0 12px; background:#F6F5F0; flex-shrink:0;" role="banner">
+      <div class="boot-shell">
+        <header class="boot-bar" role="banner">
           <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-family:'Instrument Serif',Georgia,serif; font-size:18px; font-weight:600; letter-spacing:-0.02em;">ML Canvas</span>
-            <nav aria-label="Solver controls" style="border-left:1px solid #DCDAD3; padding-left:8px; display:flex; gap:6px;">
-              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:2px 8px; border:1px solid #DCDAD3; background:#FAF9F5;">Reset</span>
-              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:2px 8px; border:1px solid #141413; background:#141413; color:#F6F5F0;">Play</span>
-              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:2px 8px; border:1px solid #DCDAD3; background:#FAF9F5;">Step</span>
+            <span style="font-family:'Instrument Serif',Georgia,serif; font-size:22px; line-height:1;">ML Canvas</span>
+            <nav aria-label="Solver controls" style="border-left:1px solid #DCDAD3; padding-left:8px; display:flex; gap:4px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; padding:4px 8px; border:1px solid #DCDAD3; background:#E8E5DD;">Reset</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; padding:4px 8px; border:1px solid #DCDAD3; background:#E8E5DD;">Play</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; padding:4px 8px; border:1px solid #DCDAD3; background:#E8E5DD;">Step</span>
             </nav>
           </div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:2px 8px; border:1px solid #141413; background:#FAF9F5; font-weight:600;">Linear SVM ▾</span>
-          </div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; padding:4px 8px; border:1px solid #141413; background:#FAF9F5; font-weight:600;">Linear SVM ▾</span>
         </header>
 
-        <!-- Main Workspace Shell -->
-        <div class="workspace-grid" style="display:grid; grid-template-columns:260px 1fr 320px; flex:1; min-height:0; background:#F6F5F0; overflow:hidden;">
-          <!-- Left Sidebar Shell -->
-          <aside class="sidebar-data" style="width:260px; border-right:1px solid #DCDAD3; background:#EFECE6; padding:12px; display:flex; flex-direction:column; gap:12px; overflow-y:auto;" role="complementary" aria-label="Dataset Controls">
-            <h2 style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin:0;">DATA</h2>
-            <div role="tablist" aria-label="Dataset task type" style="display:flex; border:1px solid #DCDAD3; background:#E8E5DD; padding:2px;">
-              <div role="tab" aria-selected="true" style="flex:1; text-align:center; padding:4px 0; font-family:'JetBrains Mono',monospace; font-size:10px; background:#EFECE6; font-weight:600;">Classification</div>
-              <div role="tab" aria-selected="false" style="flex:1; text-align:center; padding:4px 0; font-family:'JetBrains Mono',monospace; font-size:10px; color:#575653;">Regression</div>
-            </div>
+        <div class="boot-grid">
+          <aside class="boot-left" role="complementary" aria-label="Dataset Controls">
+            <h2 style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin:0;">DATA</h2>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-              <div style="height:64px; border:1px solid #141413; background:#FAF9F5; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:10px;">Linear Blobs</div>
-              <div style="height:64px; border:1px solid #DCDAD3; background:#FAF9F5; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:10px;">Concentric</div>
-              <div style="height:64px; border:1px solid #DCDAD3; background:#FAF9F5; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:10px;">XOR</div>
-              <div style="height:64px; border:1px solid #DCDAD3; background:#FAF9F5; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:10px;">Twin Spirals</div>
+              <div style="height:64px; border:1px solid #141413; background:#FAF9F5; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:10px;">Linear Blobs</div>
+              <div style="height:64px; border:1px solid #DCDAD3; background:#FAF9F5; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:10px;">Concentric</div>
+              <div style="height:64px; border:1px solid #DCDAD3; background:#FAF9F5; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:10px;">XOR Quadrants</div>
+              <div style="height:64px; border:1px solid #DCDAD3; background:#FAF9F5; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:10px;">Twin Spirals</div>
             </div>
           </aside>
 
-          <!-- Center Stage Shell -->
-          <main style="flex:1; background:#FAF9F5; display:flex; flex-direction:column; min-width:0;" role="main" aria-label="Interactive Canvas Area">
-            <div style="padding:8px 24px; border-bottom:1px solid #DCDAD3; display:flex; align-items:baseline; gap:8px;">
+          <main class="boot-main" role="main" aria-label="Interactive Canvas Area">
+            <div style="padding:8px 24px; border-bottom:1px solid #DCDAD3; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;">
               <h1 style="font-family:'Instrument Serif',Georgia,serif; font-size:24px; font-weight:normal; margin:0; letter-spacing:-0.01em;">Linear Support Vector Machine</h1>
-              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#575653; text-transform:uppercase;">Stage 01 · Classical Convex & Linear</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:10px; color:#575653; text-transform:uppercase;">Stage 01 · Continuous 2D Manifold</span>
             </div>
             <div style="flex:1; display:flex; align-items:center; justify-content:center;">
-              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#575653;">Initializing continuous mathematical solver...</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; color:#575653;">Initializing continuous mathematical solver...</span>
             </div>
           </main>
 
-          <!-- Right Sidebar Shell -->
-          <aside class="sidebar-telemetry" style="width:320px; border-left:1px solid #DCDAD3; background:#EFECE6; padding:12px; display:flex; flex-direction:column; gap:8px; overflow-y:auto;" role="complementary" aria-label="Output & Telemetry">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #DCDAD3; padding-bottom:6px;">
-              <h2 style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin:0;">OUTPUT & TELEMETRY</h2>
-              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#575653;">Linear SVM</span>
-            </div>
-            <div style="display:flex; flex-direction:column; gap:6px; font-family:'JetBrains Mono',monospace; font-size:11px;">
-              <div style="display:flex; justify-content:space-between; border-bottom:1px solid #DCDAD3; padding:4px 0;">
-                <span style="color:#575653;">TRAIN LOSS</span>
-                <span style="font-weight:600;">0.9529</span>
-              </div>
-              <div style="display:flex; justify-content:space-between; border-bottom:1px solid #DCDAD3; padding:4px 0;">
-                <span style="color:#575653;">ACCURACY</span>
-                <span style="font-weight:600;">53.1%</span>
-              </div>
-            </div>
-
-            <!-- 3-Lens Inspector Shell -->
-            <div class="three-lens-inspector" style="margin-top:8px; padding-top:8px; border-top:1px solid #DCDAD3; display:flex; flex-direction:column; gap:6px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3 style="font-family:'JetBrains Mono',monospace; font-size:10.5px; text-transform:uppercase; font-weight:600; margin:0; letter-spacing:0.05em;">3-LENS INSPECTOR</h3>
-                <div style="display:flex; gap:4px; font-family:'JetBrains Mono',monospace; font-size:10px;">
-                  <span style="padding:1px 6px; background:#FAF9F5; border:1px solid #DCDAD3; font-weight:600;">Intuition</span>
-                  <span style="padding:1px 6px; color:#575653;">Math</span>
-                  <span style="padding:1px 6px; color:#575653;">Code</span>
-                </div>
-              </div>
-              <div class="space-y-2" style="display:flex; flex-direction:column; gap:6px;">
-                <div class="p-2" style="padding:8px; background:#E8E5DD; border:1px solid #DCDAD3; border-radius:2px;">
-                  <span class="font-mono" style="font-family:'JetBrains Mono',monospace; font-size:9px; text-transform:uppercase; color:#575653; font-weight:600; display:block; margin-bottom:2px;">Core Summary</span>
-                  <p class="text-[var(--text-secondary)] leading-relaxed break-words" style="margin:0; font-size:11px; line-height:1.4; color:#141413;">Finds the unique oriented hyperplane that maximizes the geometric margin 2/||w|| separating two classes.</p>
-                </div>
-                <div class="p-2" style="padding:8px; background:#E8E5DD; border:1px solid #DCDAD3; border-radius:2px;">
-                  <span class="font-mono" style="font-family:'JetBrains Mono',monospace; font-size:9px; text-transform:uppercase; color:#575653; font-weight:600; display:block; margin-bottom:2px;">Core Assumption</span>
-                  <p class="text-[var(--text-secondary)] leading-relaxed break-words" style="margin:0; font-size:11px; line-height:1.4; color:#575653;">Data is linearly separable or soft-separable with bounded margin violations in the feature space.</p>
-                </div>
-                <div class="p-2" style="padding:8px; background:#E8E5DD; border:1px solid #DCDAD3; border-radius:2px;">
-                  <span class="font-mono" style="font-family:'JetBrains Mono',monospace; font-size:9px; text-transform:uppercase; color:#92400E; font-weight:600; display:block; margin-bottom:2px;">Failure Boundaries</span>
-                  <p class="text-[var(--text-secondary)] leading-relaxed break-words" style="margin:0; font-size:11px; line-height:1.4; color:#575653;">Points outside the margin street contribute zero gradient. Moving an outlier that is already strictly correctly classified does not alter the maximum margin hyperplane. Only active support vectors that lie on or violate the margin boundaries generate non-zero subgradients.</p>
-                </div>
-              </div>
-            </div>
+          <aside class="boot-right" role="complementary" aria-label="Output and Telemetry">
+            <h2 style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin:0; border-bottom:1px solid #DCDAD3; padding-bottom:6px;">OUTPUT & TELEMETRY</h2>
+            <p style="margin:4px 0 0; font-size:11px; line-height:1.45; color:#141413;">Finds the unique oriented hyperplane that maximizes the geometric margin 2/||w|| separating two classes.</p>
           </aside>
         </div>
       </div>
