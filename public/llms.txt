@@ -1,0 +1,29 @@
+# ML Canvas
+
+> Interactive Machine Learning Laboratory & Visualization Workbench
+
+ML Canvas is an open-source educational laboratory for real-time visualization of machine learning algorithms.
+
+## Documentation & Links
+
+- [ML Canvas Workbench](http://localhost:3000/): Interactive browser workbench for 51 machine learning algorithms.
+- [Linear SVM Classifier](http://localhost:3000/#algo=linear-svm&data=linear-blobs): Continuous convex classification laboratory.
+- [Kernel SVM](http://localhost:3000/#algo=rbf-svm): Reproducing Kernel Hilbert Space non-linear decision boundaries.
+- [Neural Networks Laboratory](http://localhost:3000/#stage=04): Deep learning and multilayer perceptron visualization.
+- [Reinforcement Learning](http://localhost:3000/#stage=07): Gridworld and continuous policy optimization.
+- [ARD Specification](http://localhost:3000/.well-known/ard.json): Machine-readable Agentic Resource Discovery manifest.
+
+## Capabilities
+
+- Stage 01: Classical Convex & Linear Models (Linear SVM, Kernel SVM, Logistic Regression, Lasso, Ridge, ElasticNet, OLS, SVR, GP, Naive Bayes)
+- Stage 02: Decision Trees, Random Forests, AdaBoost, Gradient Boosting, XGBoost, CatBoost, LightGBM
+- Stage 03: Clustering & Dimensionality Reduction (K-Means, GMM, DBSCAN, Hierarchical, PCA, LDA, ICA, t-SNE, UMAP)
+- Stage 04: Deep Learning & Neural Networks (MLP, Autoencoder, VAE, GAN)
+- Stage 05: Convolutional Vision Architectures (LeNet, AlexNet, VGG, ResNet, ViT)
+- Stage 06: Sequence Modeling & Attention (RNN, LSTM, GRU, Scaled Dot-Product Attention, Transformers)
+- Stage 07: Reinforcement Learning (Q-Learning, DQN, REINFORCE)
+
+## Architecture
+- Real-time continuous mathematical solvers executed off-thread via Web Worker.
+- Accessible 2D canvas with high-DPI crisp rendering.
+- Reproducible experiments encoded in URL hash parameters.

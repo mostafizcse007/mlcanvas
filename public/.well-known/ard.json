@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agenticresourcediscovery.org/schemas/v0.91/ard.json",
+  "entries": [
+    {
+      "identifier": "urn:air:mlcanvas.app:workbench:solver",
+      "displayName": "ML Canvas Interactive Solver",
+      "type": "application/mcp-server-card+json",
+      "url": "http://localhost:3000/api/tools.json",
+      "description": "Continuous interactive machine learning laboratory and algorithm workbench for classical, deep, vision, sequence, and reinforcement learning models.",
+      "representativeQueries": [
+        "Train linear SVM on 2D blobs",
+        "Visualize decision boundary for concentric circles",
+        "Tune SVM hyperparameter C and learning rate"
+      ]
+    }
+  ]
+}
+
